@@ -32,6 +32,7 @@
 #include <Kernel/Panic.h>
 #include <Kernel/Storage/AHCIController.h>
 #include <Kernel/Storage/IDEController.h>
+#include <Kernel/Storage/FloppyDiskController.h>
 #include <Kernel/Storage/Partition/EBRPartitionTable.h>
 #include <Kernel/Storage/Partition/GUIDPartitionTable.h>
 #include <Kernel/Storage/Partition/MBRPartitionTable.h>
@@ -78,6 +79,7 @@ UNMAP_AFTER_INIT NonnullRefPtrVector<StorageController> StorageManagement::enume
         }
     });
     controllers.append(RamdiskController::initialize());
+    controllers.append(FloppyDiskController::initialize());
     return controllers;
 }
 

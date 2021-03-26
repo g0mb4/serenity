@@ -83,7 +83,7 @@ void FloppyDiskController::detect_drives(){
     // this does not check the controller type and 
     // there can be multiple controllers as well.
     if(value_of_reg != 0){
-        m_drive_controllers.append(FloppyDiskDriveController::create(*this, 0));
+        m_drive_controllers.append(FloppyDiskDriveController::create(*this, 0, true));
     }
 
     dbgln("FloppyDiskController: devices={}", devices_count());

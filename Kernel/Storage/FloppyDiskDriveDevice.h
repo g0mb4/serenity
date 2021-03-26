@@ -42,7 +42,7 @@ public:
     virtual ~FloppyDiskDriveDevice() override;
 
     // ^StorageDevice
-    virtual Type type() const override { return StorageDevice::Type::IDE; }
+    virtual Type type() const override { return StorageDevice::Type::ISA; }
 
     // ^BlockDevice
     virtual void start_request(AsyncBlockDeviceRequest&) override;

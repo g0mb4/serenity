@@ -37,7 +37,7 @@
 namespace Kernel {
 
 class AsyncBlockDeviceRequest;
-class FloppyDiskDriveController82077AA;
+class FloppyDiskDriveController;
 
 class FloppyDiskController final : public StorageController{
     AK_MAKE_ETERNAL
@@ -58,5 +58,7 @@ private:
     FloppyDiskController();
 
     void detect_drives();
+
+    NonnullOwnPtrVector<FloppyDiskDriveController> m_drive_controllers;
 };
 }

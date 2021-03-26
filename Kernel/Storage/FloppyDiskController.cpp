@@ -28,6 +28,7 @@
 #include <AK/RefPtr.h>
 #include <AK/Types.h>
 #include <Kernel/Storage/FloppyDiskController.h>
+#include <Kernel/Storage/FloppyDiskDriveController.h>
 
 namespace Kernel {
 
@@ -77,10 +78,13 @@ void FloppyDiskController::detect_drives(){
         IO::in8(0x71);
 
     u8 value_of_reg = IO::in8(0x71);
-    u8 slave_nibble = value_of_reg & 0x0F;
-    u8 master_nibble = (value_of_reg) >> 4;  // sould be 4(=1.44 M), but got 5(=2.88 M), bug ??
 
-    dbgln("FloppyDiskController: master={}, slave={}", master_nibble, slave_nibble);
+    // FIXME: Find better way to detect controllers,
+    // this does not check the controller type and 
+    // there can be multiple controllers as well.
+    if(value_of_reg != 0){
+        m_drive_controllers.append(FloppyDiskDriveController::create(*this));
+    }
 }
 
 size_t FloppyDiskController::devices_count() const {

@@ -153,6 +153,25 @@ elif [ "$SERENITY_RUN" = "ci" ]; then
         -debugcon file:debug.log \
         -kernel Kernel/Kernel \
         -append "${SERENITY_KERNEL_CMDLINE}"
+elif [ "$SERENITY_RUN" = "fdd" ]; then
+     echo "Running QEMU with floppy support"
+
+    SERENITI_FLOPPY_IMAGE="msdos-blank.img"
+    
+    if [ ! -f $SERENITI_FLOPPY_IMAGE ]; then
+    	mkfs.msdos -C $SERENITI_FLOPPY_IMAGE 1440
+    fi
+
+    # Meta/run.sh: qemu with user networking
+    "$SERENITY_QEMU_BIN" \
+        $SERENITY_COMMON_QEMU_ARGS \
+        $SERENITY_VIRT_TECH_ARG \
+        $SERENITY_PACKET_LOGGING_ARG \
+        -netdev user,id=breh,hostfwd=tcp:127.0.0.1:8888-10.0.2.15:8888,hostfwd=tcp:127.0.0.1:8823-10.0.2.15:23,hostfwd=tcp:127.0.0.1:8000-10.0.2.15:8000,hostfwd=tcp:127.0.0.1:2222-10.0.2.15:22 \
+        -device e1000,netdev=breh \
+        -kernel Kernel/Kernel \
+        -append "${SERENITY_KERNEL_CMDLINE}" \
+        -blockdev driver=file,node-name=f0,filename=$SERENITI_FLOPPY_IMAGE -device floppy,drive=f0
 else
     # Meta/run.sh: qemu with user networking
     "$SERENITY_QEMU_BIN" \

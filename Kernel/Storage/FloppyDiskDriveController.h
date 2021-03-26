@@ -71,8 +71,8 @@ class FloppyDiskDriveController final : public IRQHandler {
     AK_MAKE_ETERNAL
 
 public:
-    static NonnullOwnPtr<FloppyDiskDriveController> create(const FloppyDiskController&, u8);
-    FloppyDiskDriveController(const FloppyDiskController&, u8);
+    static NonnullOwnPtr<FloppyDiskDriveController> create(const FloppyDiskController&, u8, bool);
+    FloppyDiskDriveController(const FloppyDiskController&, u8, bool);
     virtual ~FloppyDiskDriveController() override;
 
     virtual const char* purpose() const override { return "82077AA controller"; }
@@ -86,6 +86,11 @@ private:
     //^ IRQHandler
     virtual void handle_irq(const RegisterState&) override;
 
+    void read_sectors_with_dma(u8);
+    void read_sectors_with_polling(AsyncBlockDeviceRequest&, u8);
+
+    void initialize();
+
     void detect_drives();
     char drive_label_char(u8 label) const { return 'a' + label; }
     String drive_type_string(u8) const;
@@ -97,6 +102,8 @@ private:
     NonnullRefPtr<FloppyDiskController> m_parent_controller;
     NonnullRefPtrVector<FloppyDiskDriveDevice> m_devices;
     u8 m_label;     // FDC0, FDC1 ...
+    RefPtr<PhysicalPage> m_dma_buffer_page;
+    bool m_use_dma { true };
 };
 
 }

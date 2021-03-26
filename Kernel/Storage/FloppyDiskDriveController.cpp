@@ -40,21 +40,25 @@
 
 namespace Kernel {
 
-UNMAP_AFTER_INIT NonnullOwnPtr<FloppyDiskDriveController> FloppyDiskDriveController::create(const FloppyDiskController& controller, u8 label)
+UNMAP_AFTER_INIT NonnullOwnPtr<FloppyDiskDriveController> FloppyDiskDriveController::create(const FloppyDiskController& controller, u8 label, bool use_dma)
 {
-    return make<FloppyDiskDriveController>(controller, label);
+    return make<FloppyDiskDriveController>(controller, label, use_dma);
 }
 
-UNMAP_AFTER_INIT FloppyDiskDriveController::FloppyDiskDriveController(const FloppyDiskController& controller, u8 label)
+UNMAP_AFTER_INIT FloppyDiskDriveController::FloppyDiskDriveController(const FloppyDiskController& controller, u8 label,  bool use_dma)
     : IRQHandler(FLOPPY_IRQ)
     , m_parent_controller(controller)
     , m_label(label)
+    , m_use_dma(use_dma)
 {
     disable_irq();
 
     detect_drives();
 
+    initialize();
+
     enable_irq();
+
 }
 
 UNMAP_AFTER_INIT FloppyDiskDriveController::~FloppyDiskDriveController()
@@ -64,9 +68,16 @@ UNMAP_AFTER_INIT FloppyDiskDriveController::~FloppyDiskDriveController()
 void FloppyDiskDriveController::start_request(AsyncBlockDeviceRequest& request, u8 drive)
 {
     if(request.request_type() == AsyncBlockDeviceRequest::Read){
-        dbgln_if(DEBUG_82077AA, "FDC{}: read request from drive {:c}", label_char(), drive_label_char(drive));
+        dbgln_if(DEBUG_82077AA, "fdc{:c}/fd{:c}: read from {} ({} blocks)", label_char(), drive_label_char(drive), request.block_index(), request.block_count());
+
+      //  if(m_use_dma){
+      //      read_sectors_with_dma(drive);
+      //  } else {
+            read_sectors_with_polling(request, drive);
+      //  }
+
     } else {
-        dbgln_if(DEBUG_82077AA, "FDC{}: write request to drive {:c}", label_char(), drive_label_char(drive));
+        dbgln_if(DEBUG_82077AA, "fdc{:c}: write {} blocks to drive {:c}", label_char(), request.block_count(), drive_label_char(drive));
     }
 }
 
@@ -106,6 +117,12 @@ UNMAP_AFTER_INIT void FloppyDiskDriveController::detect_drives()
     dbgln("FDC{}: master={}, slave={}", label_char(), drive_type_string(master_nibble), drive_type_string(slave_nibble));
 }
 
+UNMAP_AFTER_INIT void FloppyDiskDriveController::initialize(){
+    if(m_use_dma){
+        m_dma_buffer_page = MM.allocate_supervisor_physical_page();
+    }
+}
+
 String FloppyDiskDriveController::drive_type_string(u8 drive_type) const{
     switch(drive_type){
     case FLOPPY_DRIVE_TYPE_NO_DRIVE: return "no drive";
@@ -122,6 +139,29 @@ String FloppyDiskDriveController::drive_type_string(u8 drive_type) const{
 RefPtr<StorageDevice> FloppyDiskDriveController::device(u32 index) const{
     VERIFY(index < m_devices.size());
     return m_devices[index];
+}
+
+void FloppyDiskDriveController::read_sectors_with_dma(u8){
+    TODO();
+}
+
+// FIXME: Dirty hack, just to see if it works
+void FloppyDiskDriveController::read_sectors_with_polling(AsyncBlockDeviceRequest& request, u8 label){
+    u8 zeros[512];
+    (void) label;
+
+    for(unsigned i = 0; i < 512; i++){
+        zeros[i] = 0;
+    }
+
+    for(unsigned i = 0; i < request.block_count(); i++){e
+        if (!request.write_to_buffer(request.buffer(), zeros, 512)) {
+            request.complete(AsyncDeviceRequest::MemoryFault);
+            return;
+        }
+    }
+
+    request.complete(AsyncDeviceRequest::Success);
 }
 
 }

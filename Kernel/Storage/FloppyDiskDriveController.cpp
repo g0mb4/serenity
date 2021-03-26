@@ -32,19 +32,23 @@
 #include <Kernel/Process.h>
 #include <Kernel/Storage/FloppyDiskController.h>
 #include <Kernel/Storage/FloppyDiskDriveController.h>
+#include <Kernel/Storage/FloppyDiskDriveDevice.h>
 #include <Kernel/VM/MemoryManager.h>
 #include <Kernel/WorkQueue.h>
 
+#define DEBUG_82077AA   1
+
 namespace Kernel {
 
-UNMAP_AFTER_INIT NonnullOwnPtr<FloppyDiskDriveController> FloppyDiskDriveController::create(const FloppyDiskController& controller)
+UNMAP_AFTER_INIT NonnullOwnPtr<FloppyDiskDriveController> FloppyDiskDriveController::create(const FloppyDiskController& controller, u8 label)
 {
-    return make<FloppyDiskDriveController>(controller);
+    return make<FloppyDiskDriveController>(controller, label);
 }
 
-UNMAP_AFTER_INIT FloppyDiskDriveController::FloppyDiskDriveController(const FloppyDiskController& controller)
+UNMAP_AFTER_INIT FloppyDiskDriveController::FloppyDiskDriveController(const FloppyDiskController& controller, u8 label)
     : IRQHandler(FLOPPY_IRQ)
     , m_parent_controller(controller)
+    , m_label(label)
 {
     disable_irq();
 
@@ -57,9 +61,13 @@ UNMAP_AFTER_INIT FloppyDiskDriveController::~FloppyDiskDriveController()
 {
 }
 
-void FloppyDiskDriveController::start_request(AsyncBlockDeviceRequest&, u8)
+void FloppyDiskDriveController::start_request(AsyncBlockDeviceRequest& request, u8 drive)
 {
-    TODO();
+    if(request.request_type() == AsyncBlockDeviceRequest::Read){
+        dbgln_if(DEBUG_82077AA, "FDC{}: read request from drive {:c}", label_char(), drive_label_char(drive));
+    } else {
+        dbgln_if(DEBUG_82077AA, "FDC{}: write request to drive {:c}", label_char(), drive_label_char(drive));
+    }
 }
 
 void FloppyDiskDriveController::complete_current_request(AsyncDeviceRequest::RequestResult)
@@ -86,7 +94,16 @@ UNMAP_AFTER_INIT void FloppyDiskDriveController::detect_drives()
     u8 slave_nibble = value_of_reg & 0x0F;
     u8 master_nibble = (value_of_reg & 0xF0) >> 4;  // sould be 1.44 M, but got 2.88 M, bug ??
 
-    dbgln("Floppy Drives: master={}, slave={}", drive_type_string(master_nibble), drive_type_string(slave_nibble));
+    // FIXME: Sort out usupported drives, check for size.
+    if(master_nibble != FLOPPY_DRIVE_TYPE_NO_DRIVE){
+        m_devices.append(FloppyDiskDriveDevice::create(m_parent_controller, *this, 0, 1440));
+    }
+
+    if(slave_nibble != FLOPPY_DRIVE_TYPE_NO_DRIVE){
+        m_devices.append(FloppyDiskDriveDevice::create(m_parent_controller, *this, 1, 1440));
+    }
+
+    dbgln("FDC{}: master={}, slave={}", label_char(), drive_type_string(master_nibble), drive_type_string(slave_nibble));
 }
 
 String FloppyDiskDriveController::drive_type_string(u8 drive_type) const{
@@ -100,6 +117,11 @@ String FloppyDiskDriveController::drive_type_string(u8 drive_type) const{
     default:
         VERIFY_NOT_REACHED();
     }
+}
+
+RefPtr<StorageDevice> FloppyDiskDriveController::device(u32 index) const{
+    VERIFY(index < m_devices.size());
+    return m_devices[index];
 }
 
 }

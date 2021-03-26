@@ -83,18 +83,32 @@ void FloppyDiskController::detect_drives(){
     // this does not check the controller type and 
     // there can be multiple controllers as well.
     if(value_of_reg != 0){
-        m_drive_controllers.append(FloppyDiskDriveController::create(*this));
+        m_drive_controllers.append(FloppyDiskDriveController::create(*this, 0));
     }
+
+    dbgln("FloppyDiskController: devices={}", devices_count());
 }
 
 size_t FloppyDiskController::devices_count() const {
-    return 0;
+    size_t number_of_devices = 0;
+    
+    for(size_t i = 0; i < m_drive_controllers.size(); i++){
+        number_of_devices += m_drive_controllers[i].devices_count();
+    }
+
+    return number_of_devices;
 }
 
 RefPtr<StorageDevice> FloppyDiskController::device(u32 index) const
 {
-    (void)index;
-    return nullptr;
+    for(size_t i = 0; i < m_drive_controllers.size(); i++){
+        if(index >= m_drive_controllers[i].devices_count()){
+            index -= m_drive_controllers[i].devices_count();
+        } else {
+            return m_drive_controllers[i].device(index);
+        }
+    }
+    VERIFY_NOT_REACHED();
 }
 
 }

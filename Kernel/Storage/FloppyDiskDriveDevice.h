@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, J. Tóth <toth-janos@outlook.com>
+ * Copyright (c) 2018-2020, Andreas Kling <kling@serenityos.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,42 +26,35 @@
 
 #pragma once
 
-#include <AK/OwnPtr.h>
-#include <AK/RefPtr.h>
-#include <AK/String.h>
-#include <AK/Types.h>
-#include <Kernel/IO.h>
-#include <Kernel/Storage/StorageController.h>
+#include <Kernel/Interrupts/IRQHandler.h>
+#include <Kernel/Lock.h>
 #include <Kernel/Storage/StorageDevice.h>
 
 namespace Kernel {
 
-class AsyncBlockDeviceRequest;
+class FloppyDiskController;
 class FloppyDiskDriveController;
-class FloppyDiskDriveDevice;
-
-class FloppyDiskController final : public StorageController{
-    friend class FloppyDiskDriveDevice;
+class FloppyDiskDriveDevice final : public StorageDevice {
+    friend class FloppyDiskController;
     AK_MAKE_ETERNAL
 public:
-public:
-    static NonnullRefPtr<FloppyDiskController> initialize();
-    virtual ~FloppyDiskController() override;
+    static NonnullRefPtr<FloppyDiskDriveDevice> create(const FloppyDiskController&, FloppyDiskDriveController&, u8, u64);
+    virtual ~FloppyDiskDriveDevice() override;
 
-    virtual Type type() const override { return Type::IDE; }
-    virtual RefPtr<StorageDevice> device(u32 index) const override;
-    virtual bool reset() override;
-    virtual bool shutdown() override;
-    virtual size_t devices_count() const override;
-    virtual void start_request(const StorageDevice&, AsyncBlockDeviceRequest&) override;
-    virtual void complete_current_request(AsyncDeviceRequest::RequestResult) override;
+    // ^StorageDevice
+    virtual Type type() const override { return StorageDevice::Type::IDE; }
+
+    // ^BlockDevice
+    virtual void start_request(AsyncBlockDeviceRequest&) override;
+    virtual String device_name() const override;
 
 private:
-    FloppyDiskController();
+    FloppyDiskDriveDevice(const FloppyDiskController&, FloppyDiskDriveController&, u8, u64);
 
-    void detect_drives();
-
-    NonnullOwnPtrVector<FloppyDiskDriveController> m_drive_controllers;
+    // ^DiskDevice
+    virtual const char* class_name() const override;
+    FloppyDiskDriveController& m_drive_controller;
+    u8 m_label;
 };
 
 }

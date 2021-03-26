@@ -58,6 +58,7 @@ set(KERNEL_SOURCES
     Storage/SATADiskDevice.cpp
     Storage/FloppyDiskController.cpp
     Storage/FloppyDiskDriveController.cpp
+     Storage/FloppyDiskDriveDevice.cpp
     Storage/IDEController.cpp
     Storage/IDEChannel.cpp
     Storage/PATADiskDevice.cpp

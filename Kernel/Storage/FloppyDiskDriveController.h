@@ -63,31 +63,40 @@ namespace Kernel {
 
 class AsyncBlockDeviceRequest;
 class FloppyDiskController;
+class FloppyDiskDriveDevice;
 
 class FloppyDiskDriveController final : public IRQHandler {
     friend class FloppyDiskController;
+    friend class FloppyDiskDriveDevice;
     AK_MAKE_ETERNAL
 
 public:
-    static NonnullOwnPtr<FloppyDiskDriveController> create(const FloppyDiskController&);
-    FloppyDiskDriveController(const FloppyDiskController&);
+    static NonnullOwnPtr<FloppyDiskDriveController> create(const FloppyDiskController&, u8);
+    FloppyDiskDriveController(const FloppyDiskController&, u8);
     virtual ~FloppyDiskDriveController() override;
 
     virtual const char* purpose() const override { return "82077AA controller"; }
+
+    RefPtr<StorageDevice> device(u32 index) const;
+    size_t devices_count() const { return m_devices.size(); }
+    u8 label() const { return m_label; }
+    char label_char() const { return '0' + m_label; } 
 
 private:
     //^ IRQHandler
     virtual void handle_irq(const RegisterState&) override;
 
     void detect_drives();
+    char drive_label_char(u8 label) const { return 'a' + label; }
     String drive_type_string(u8) const;
 
-    void start_request(AsyncBlockDeviceRequest&, u8 label);
+    void start_request(AsyncBlockDeviceRequest&, u8);
     void complete_current_request(AsyncDeviceRequest::RequestResult);
 
     // Data members
-
     NonnullRefPtr<FloppyDiskController> m_parent_controller;
+    NonnullRefPtrVector<FloppyDiskDriveDevice> m_devices;
+    u8 m_label;     // FDC0, FDC1 ...
 };
 
 }

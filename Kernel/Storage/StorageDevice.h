@@ -43,6 +43,7 @@ public:
         IDE,
         SATA,
         NVMe,
+        ISA
     };
 
 public:

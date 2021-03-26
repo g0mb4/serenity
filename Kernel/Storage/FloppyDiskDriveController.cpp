@@ -154,7 +154,7 @@ void FloppyDiskDriveController::read_sectors_with_polling(AsyncBlockDeviceReques
         zeros[i] = 0;
     }
 
-    for(unsigned i = 0; i < request.block_count(); i++){e
+    for(unsigned i = 0; i < request.block_count(); i++){
         if (!request.write_to_buffer(request.buffer(), zeros, 512)) {
             request.complete(AsyncDeviceRequest::MemoryFault);
             return;

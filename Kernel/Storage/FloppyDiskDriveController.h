@@ -83,6 +83,34 @@ public:
     char label_char() const { return '0' + m_label; } 
 
 private:
+    // valid only for primary controller
+    enum class FloppyDiskDriveControllerRegisters: u16 {
+        StatusRegisterA = 0x3f0,                // SRA  - read-only (PS/2 only)
+        StatusRegisterB = 0x3f1,                // SRB  - read-only (PS/2 only)
+        DigitalOutputRegister = 0x3f2,          // DOR
+        TapeDriveRegister = 0x3f3,              // TDR
+        MainStatusRegister = 0x3f4,             // MSR  - read-only
+        DatarateSelectRegister = 0x3f4,         // DSR  - write-only (PS/2 only)
+        DataFIFO = 0x3f5,                       // FIFO               
+        DigitalInputRegister = 0x3f7,           // DIR  - read-only (AT only)
+        ConfigurationControlRegister = 0x3f7    // CTRL - write-only (AT only)
+    };
+
+    enum class FloppyDiskDriveControllerCommands: u8 {
+    	ReadTrack = 0x2,
+	    Specify = 0x3,
+	    CheckStatus = 0x4,
+	    WriteSector = 0x5,
+	    ReadSector = 0x6,
+	    Calibrate = 0x7,
+	    CheckIterrupt = 0x8,
+	    WriteDeleteSector = 0x9,
+	    ReadIdSector = 0xa,
+	    ReadDeleteSector = 0xc,
+	    FormatTrack = 0xd,
+	    Seek = 0xf
+    };
+
     //^ IRQHandler
     virtual void handle_irq(const RegisterState&) override;
 

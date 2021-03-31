@@ -59,7 +59,8 @@ public:
 private:
     FloppyDiskController();
 
-    void detect_drives();
+    void detect_controllers();
+    u8 detect_version();
 
     NonnullOwnPtrVector<FloppyDiskDriveController> m_drive_controllers;
 };

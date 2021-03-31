@@ -107,7 +107,7 @@
 #define	FDC_CMD_WRITE_SECT		0x05
 #define	FDC_CMD_READ_SECT		0x06
 #define	FDC_CMD_CALIBRATE		0x07
-#define	FDC_CMD_CHECK_INT		0x08
+#define	FDC_CMD_check_interrupt		0x08
 #define	FDC_CMD_FORMAT_TRACK	0x0D
 #define	FDC_CMD_SEEK			0x0F
 #define FDC_CMD_VERSION         0x10
@@ -207,11 +207,10 @@ private:
     u8 read_data();
 
     void motor_control(u8, bool);
-    void drive_data(u32, u32, u32);
     
     bool calibrate(u8);
 
-    void check_int(u8&, u8&);
+    void check_interrupt(u8&, u8&);
 
     void start_request(AsyncBlockDeviceRequest&, u8);
     void complete_current_request(AsyncDeviceRequest::RequestResult);

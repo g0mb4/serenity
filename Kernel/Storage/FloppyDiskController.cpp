@@ -61,20 +61,46 @@ void FloppyDiskController::complete_current_request(AsyncDeviceRequest::RequestR
 UNMAP_AFTER_INIT FloppyDiskController::FloppyDiskController()
     : StorageController()
 {
-    detect_drives();
+    detect_controllers();
 }
 
 UNMAP_AFTER_INIT FloppyDiskController::~FloppyDiskController()
 {
 }
 
-void FloppyDiskController::detect_drives(){
-    u8 value_of_reg = CMOS::read(0x10);
-    // FIXME: Find better way to detect controllers,
-    // this does not check the controller type and 
-    // there can be multiple controllers as well.
-    if(value_of_reg != 0){
+// FIXME: this is only valid for the main controller
+UNMAP_AFTER_INIT u8 FloppyDiskController::detect_version(){
+    // FIXME: use values from FloppyDiskDriveController.h
+    const u16 MainStatusRegister = 0x3f4;
+    const u16 DataFIFO = 0x3f5;   
+    const u8 VersionCommand = 0x10;
+
+    auto read_status = []() -> u8 {
+        return IO::in8(MainStatusRegister);
+    };
+
+    for(u16 i = 0; i < 500; i++){
+        if (read_status() & FDC_MSR_MASK_DATAREG){
+            IO::out8(DataFIFO, VersionCommand);
+            break;
+        }
+    }
+
+    for (u16 i = 0; i < 500; i++ ){
+        if (read_status() & FDC_MSR_MASK_DATAREG){
+            return IO::in8(DataFIFO);
+        }
+    }
+
+    return 0;
+}
+
+UNMAP_AFTER_INIT void FloppyDiskController::detect_controllers(){
+    if(detect_version() == 0x90){
+        dbgln("FloppyDiskController: compatible controller found.");
         m_drive_controllers.append(FloppyDiskDriveController::create(*this, 0, true));
+    } else {
+        dbgln("FloppyDiskController: unknown controller found.");
     }
 
     dbgln("FloppyDiskController: devices={}", devices_count());

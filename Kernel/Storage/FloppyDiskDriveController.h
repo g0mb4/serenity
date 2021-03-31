@@ -57,6 +57,71 @@
 #define FLOPPY_DRIVE_TYPE_1440KB_35IN   4
 #define FLOPPY_DRIVE_TYPE_2880KB_35IN   5
 
+#define FDC_DOR_MASK_DRIVE0			0x00
+#define FDC_DOR_MASK_DRIVE1			0x01
+#define FDC_DOR_MASK_DRIVE2			0x02
+#define FDC_DOR_MASK_DRIVE3			0x03
+#define FDC_DOR_MASK_RESET			0x04
+#define FDC_DOR_MASK_DMA			0x08
+#define FDC_DOR_MASK_DRIVE0_MOTOR	0x10
+#define FDC_DOR_MASK_DRIVE1_MOTOR	0x20
+#define FDC_DOR_MASK_DRIVE2_MOTOR	0x40
+#define FDC_DOR_MASK_DRIVE3_MOTOR	0x80
+
+#define FDC_MSR_MASK_DRIVE1_POS_MODE	0x01
+#define FDC_MSR_MASK_DRIVE2_POS_MODE	0x02
+#define FDC_MSR_MASK_DRIVE3_POS_MODE	0x04
+#define FDC_MSR_MASK_DRIVE4_POS_MODE	0x08
+#define FDC_MSR_MASK_BUSY				0x10
+#define FDC_MSR_MASK_DMA				0x20
+#define FDC_MSR_MASK_DATAIO				0x40
+#define FDC_MSR_MASK_DATAREG			0x80
+
+#define FDC_ST0_MASK_DRIVE0			0x00
+#define FDC_ST0_MASK_DRIVE1			0x01
+#define FDC_ST0_MASK_DRIVE2			0x02
+#define FDC_ST0_MASK_DRIVE3			0x03
+#define FDC_ST0_MASK_HEADACTIVE		0x04
+#define FDC_ST0_MASK_NOTREADY		0x08
+#define FDC_ST0_MASK_UNITCHECK		0x10
+#define FDC_ST0_MASK_SEEKEND		0x20
+#define FDC_ST0_MASK_INTCODE		0x40
+
+#define FDC_ST0_TYP_NORMAL			0x00
+#define FDC_ST0_TYP_ABNORMAL_ERR	0x01
+#define FDC_ST0_TYP_INVALID_ERR		0x02
+#define FDC_ST0_TYP_NOTREADY		0x03
+
+#define FDC_GAP3_LENGTH_STD 	42
+#define FDC_GAP3_LENGTH_5_14	32
+#define FDC_GAP3_LENGTH_3_5		27
+
+#define FDC_SECTOR_DTL_128		0x00
+#define FDC_SECTOR_DTL_256		0x01
+#define FDC_SECTOR_DTL_512		0x02
+#define FDC_SECTOR_DTL_1024		0x04
+
+#define	FDC_CMD_READ_TRACK		0x02
+#define	FDC_CMD_SPECIFY			0x03
+#define	FDC_CMD_CHECK_STAT		0x04
+#define	FDC_CMD_WRITE_SECT		0x05
+#define	FDC_CMD_READ_SECT		0x06
+#define	FDC_CMD_CALIBRATE		0x07
+#define	FDC_CMD_CHECK_INT		0x08
+#define	FDC_CMD_FORMAT_TRACK	0x0D
+#define	FDC_CMD_SEEK			0x0F
+#define FDC_CMD_VERSION         0x10
+#define FDC_CMD_PERPENDICULAR   0x12
+#define FDC_CMD_CONFIGURE       0x13
+#define FDC_CMD_LOCK            0x94
+#define FDC_CMD_UNLOCK          0x14
+
+#define FDC_CMD_EXT_SKIP		0x20
+#define FDC_CMD_EXT_DENSITY		0x40
+#define FDC_CMD_EXT_MULTITRACK	0x80
+
+#define FDC_SECTORS_PER_TRACK	18
+
 #define FLOPPY_IRQ 6
 
 namespace Kernel {
@@ -64,6 +129,12 @@ namespace Kernel {
 class AsyncBlockDeviceRequest;
 class FloppyDiskController;
 class FloppyDiskDriveDevice;
+
+struct PhysicalRegionDescriptor {
+    PhysicalAddress offset;
+    u16 size { 0 };
+    u16 end_of_table { 0 };
+};
 
 class FloppyDiskDriveController final : public IRQHandler {
     friend class FloppyDiskController;
@@ -113,9 +184,11 @@ private:
 
     //^ IRQHandler
     virtual void handle_irq(const RegisterState&) override;
-
-    void read_sectors_with_dma(u8);
-    void read_sectors_with_polling(AsyncBlockDeviceRequest&, u8);
+    void wait_for_irq();
+    void expect_irq() { irq_recieved = false; irq_expected++; }
+    
+    void read_sector_with_dma(u8, u32);
+    void read_sector_with_polling(u8);
 
     void initialize();
 
@@ -123,15 +196,49 @@ private:
     char drive_label_char(u8 label) const { return 'a' + label; }
     String drive_type_string(u8) const;
 
+    void initialize_dma();
+    void read_dma();
+    void write_dma();
+
+    u8 read_status();
+    void write_dor(u8);
+    void write_ccr(u8);
+    void send_cmd(u8);
+    u8 read_data();
+
+    void motor_control(u8, bool);
+    void drive_data(u32, u32, u32);
+    
+    bool calibrate(u8);
+
+    void check_int(u8&, u8&);
+
     void start_request(AsyncBlockDeviceRequest&, u8);
     void complete_current_request(AsyncDeviceRequest::RequestResult);
 
+    void disable();
+    void enable();
+
+    void reset();
+
+    void read_sector_imp(u8, u8, u8, u8);
+    bool seek(u8, u8, u8);
+
+    void lba_to_chs(u32, u8&, u8&, u8&);
+
     // Data members
+    AsyncBlockDeviceRequest* m_current_request { nullptr };
+    u32 m_current_request_block_index { 0 };
+    SpinLock<u8> m_request_lock;
+
     NonnullRefPtr<FloppyDiskController> m_parent_controller;
     NonnullRefPtrVector<FloppyDiskDriveDevice> m_devices;
     u8 m_label;     // FDC0, FDC1 ...
     RefPtr<PhysicalPage> m_dma_buffer_page;
     bool m_use_dma { true };
+    bool irq_recieved { false };
+    u16 irq_expected {0};
+
 };
 
 }

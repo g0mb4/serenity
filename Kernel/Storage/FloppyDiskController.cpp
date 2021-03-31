@@ -29,6 +29,7 @@
 #include <AK/Types.h>
 #include <Kernel/Storage/FloppyDiskController.h>
 #include <Kernel/Storage/FloppyDiskDriveController.h>
+#include <Kernel/CMOS.h>
 
 namespace Kernel {
 
@@ -68,17 +69,7 @@ UNMAP_AFTER_INIT FloppyDiskController::~FloppyDiskController()
 }
 
 void FloppyDiskController::detect_drives(){
-    // Asking the CMOS about the types of the connected 
-    // floppy disk drives.
-    IO::out8(0x70, 0x10);
-    
-    // Using some delay on reading resgister, so it
-    // has some time to react.
-    for (int i = 0; i < 4; ++i)
-        IO::in8(0x71);
-
-    u8 value_of_reg = IO::in8(0x71);
-
+    u8 value_of_reg = CMOS::read(0x10);
     // FIXME: Find better way to detect controllers,
     // this does not check the controller type and 
     // there can be multiple controllers as well.

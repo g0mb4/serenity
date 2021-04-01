@@ -233,7 +233,7 @@ private:
     NonnullRefPtr<FloppyDiskController> m_parent_controller;
     NonnullRefPtrVector<FloppyDiskDriveDevice> m_devices;
     u8 m_label;     // FDC0, FDC1 ...
-    RefPtr<PhysicalPage> m_dma_buffer_page;
+    OwnPtr<Region> m_dma_region;
     bool m_use_dma { true };
     bool irq_recieved { false };
     u16 irq_expected {0};

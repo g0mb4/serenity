@@ -36,11 +36,9 @@
 #include <Kernel/VM/MemoryManager.h>
 #include <Kernel/WorkQueue.h>
 #include <Kernel/CMOS.h>
+#include <Kernel/VM/AnonymousVMObject.h>
 
 #define DEBUG_FDC   1
-
-#define floppy_dmalen 512
-static u8 dma_buffer[floppy_dmalen] __attribute__((aligned(0x8000)));
 
 namespace Kernel {
 
@@ -57,15 +55,11 @@ UNMAP_AFTER_INIT FloppyDiskDriveController::FloppyDiskDriveController(const Flop
 {
     disable_irq();
 
-    // FIXME: remove this, shoud use MM.allocate_supervisor_physical_page()
-    memset(dma_buffer, 0xaa, 512);
-
     detect_drives();
 
     enable_irq();
 
     initialize();
-
 }
 
 UNMAP_AFTER_INIT FloppyDiskDriveController::~FloppyDiskDriveController()
@@ -105,13 +99,9 @@ void FloppyDiskDriveController::complete_current_request(AsyncDeviceRequest::Req
         auto& request = *m_current_request;
         m_current_request = nullptr;
 
-        //const u32 foo_offset = 0xc0000000;
-        //FIXME: cannot read m_dma_buffer_page addr :(
-        const u32 foo_offset = 0xc0000000;
-
         if (result == AsyncDeviceRequest::Success) {
             if (request.request_type() == AsyncBlockDeviceRequest::Read) {
-                if (!request.write_to_buffer(request.buffer(), m_dma_buffer_page->paddr().offset(foo_offset).as_ptr(), 512)) {                        
+                if (!request.write_to_buffer(request.buffer(), m_dma_region->vaddr().as_ptr(), 512)) {                        
                     lock.unlock();
                     request.complete(AsyncDeviceRequest::MemoryFault);
                     return;
@@ -119,7 +109,7 @@ void FloppyDiskDriveController::complete_current_request(AsyncDeviceRequest::Req
 
                 dbgln_if(DEBUG_FDC, "fdc{:c}: succesfully read {} blocks", label_char(), request.block_count());
 #if DEBUG_FDC
-                u32 addr = (u32)m_dma_buffer_page->paddr().offset(foo_offset).as_ptr();
+                u32 addr = (u32)m_dma_region->vaddr().as_ptr();
                 //addr -= 0xc0000000;
                 const u8 * buf = (u8* )addr;
                 dbgln("fdc{:c}: buffer={:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} ...", label_char(), buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]);
@@ -213,10 +203,14 @@ UNMAP_AFTER_INIT void FloppyDiskDriveController::initialize(){
 }
 
 void FloppyDiskDriveController::initialize_dma(){
-    m_dma_buffer_page = MM.allocate_supervisor_physical_page();
+    auto page = MM.allocate_supervisor_physical_page();
+    VERIFY(page);
+    auto vmobject = AnonymousVMObject::create_with_physical_page(*page);
+    m_dma_region = MM.allocate_kernel_region_with_vmobject(*vmobject, PAGE_SIZE, "FDC DMA buffer", Region::Access::Read | Region::Access::Write);
+    VERIFY(m_dma_region);
 
-    u32 addr = (u32)m_dma_buffer_page->paddr().get();
-    u16 count = floppy_dmalen - 1;   // -1 because of DMA counting
+    u32 addr = (u32)m_dma_region->physical_page(0)->paddr().get();
+    u16 count = 512 - 1;   // -1 because of DMA counting
 
     u8 addr_0 = addr & 0x000000ff;
     u8 addr_1 = (addr & 0x0000ff00) >> 8;

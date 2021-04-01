@@ -184,8 +184,8 @@ private:
 
     //^ IRQHandler
     virtual void handle_irq(const RegisterState&) override;
+    void expect_irq();
     void wait_for_irq();
-    void expect_irq() { irq_recieved = false; irq_expected++; }
     
     void read_sector_with_dma(u8, u32);
     void read_sector_with_polling(u8);
@@ -197,8 +197,8 @@ private:
     String drive_type_string(u8) const;
 
     void initialize_dma();
-    void read_dma();
-    void write_dma();
+    void setup_dma_read();
+    void setup_dma_write();
 
     u8 read_status();
     void write_dor(u8);
@@ -235,9 +235,8 @@ private:
     u8 m_label;     // FDC0, FDC1 ...
     OwnPtr<Region> m_dma_region;
     bool m_use_dma { true };
-    bool irq_recieved { false };
     u16 irq_expected {0};
-
+    WaitQueue m_irq_queue;
 };
 
 }

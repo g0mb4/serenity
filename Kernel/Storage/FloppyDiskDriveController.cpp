@@ -35,6 +35,7 @@
 #include <Kernel/Storage/FloppyDiskDriveDevice.h>
 #include <Kernel/VM/MemoryManager.h>
 #include <Kernel/WorkQueue.h>
+#include <Kernel/WaitQueue.h>
 #include <Kernel/CMOS.h>
 #include <Kernel/VM/AnonymousVMObject.h>
 
@@ -53,11 +54,7 @@ UNMAP_AFTER_INIT FloppyDiskDriveController::FloppyDiskDriveController(const Flop
     , m_label(label)
     , m_use_dma(use_dma)
 {
-    disable_irq();
-
     detect_drives();
-
-    enable_irq();
 
     initialize();
 }
@@ -68,10 +65,7 @@ UNMAP_AFTER_INIT FloppyDiskDriveController::~FloppyDiskDriveController()
 
 void FloppyDiskDriveController::start_request(AsyncBlockDeviceRequest& request, u8 drive)
 {
-    ScopedSpinLock lock(m_request_lock);
-
     m_current_request = &request;
-    m_current_request_block_index = 0;
 
     if(request.request_type() == AsyncBlockDeviceRequest::Read){
         dbgln_if(DEBUG_FDC, "fdc{:c}/fd{:c}: requested read from {} ({} blocks)", label_char(), drive_label_char(drive), request.block_index(), request.block_count());
@@ -81,61 +75,51 @@ void FloppyDiskDriveController::start_request(AsyncBlockDeviceRequest& request, 
         } else {
             read_sector_with_polling(drive);
         }
-
     } else {
-        dbgln_if(DEBUG_FDC, "fdc{:c}: requested write {} blocks to drive {:c}", label_char(), request.block_count(), drive_label_char(drive));
+        dbgln_if(DEBUG_FDC, "fdc{:c}/fd{:c}: requested write to {} ({} blocks)", label_char(), drive_label_char(drive), request.block_index(), request.block_count());
     }
 }
 
 void FloppyDiskDriveController::complete_current_request(AsyncDeviceRequest::RequestResult result)
 {
-    VERIFY(m_current_request);
-    VERIFY(m_request_lock.is_locked());
-
-    g_io_work->queue([this, result]() {
         dbgln_if(DEBUG_FDC, "fdc{:c}: completed current request, result={}", label_char(), (int)result);
-        ScopedSpinLock lock(m_request_lock);
         VERIFY(m_current_request);
         auto& request = *m_current_request;
-        m_current_request = nullptr;
 
         if (result == AsyncDeviceRequest::Success) {
             if (request.request_type() == AsyncBlockDeviceRequest::Read) {
                 if (!request.write_to_buffer(request.buffer(), m_dma_region->vaddr().as_ptr(), 512)) {                        
-                    lock.unlock();
                     request.complete(AsyncDeviceRequest::MemoryFault);
-                    return;
+                    goto cleanup;
                 }
 
                 dbgln_if(DEBUG_FDC, "fdc{:c}: succesfully read {} blocks", label_char(), request.block_count());
 #if DEBUG_FDC
                 u32 addr = (u32)m_dma_region->vaddr().as_ptr();
-                //addr -= 0xc0000000;
+                //u32 addr = m_dma_region->physical_page(0)->paddr().get();
                 const u8 * buf = (u8* )addr;
                 dbgln("fdc{:c}: buffer={:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} ...", label_char(), buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]);
 #endif
             }
         }
 
-        lock.unlock();
         request.complete(result);
-
-        u8 st0, cyl;
-        for (u8 i = 0; i < 7; i++)
-	 	    read_data();
-	    // //! let FDC know we handled interrupt
-	    check_interrupt(st0, cyl);
-    });
+cleanup:
+        m_current_request = nullptr;
 }
 
+ void FloppyDiskDriveController::expect_irq(){
+    irq_expected++;
+    enable_irq();
+ }
+
 void FloppyDiskDriveController::wait_for_irq(){
-    while(irq_recieved == false);
+    m_irq_queue.wait_forever("FDC");
+    disable_irq();
 }
 
 void FloppyDiskDriveController::handle_irq(const RegisterState&)
 {
-    ScopedSpinLock lock(m_request_lock);
-
     if(irq_expected == 0){
         dbgln("fdc{:c}: unexpected interrupt.", label_char());
     } else {
@@ -143,13 +127,7 @@ void FloppyDiskDriveController::handle_irq(const RegisterState&)
         irq_expected--;
     }
 
-    if (!m_current_request) {
-        dbgln("fdc{:c}: interrupt, but no pendig request.", label_char());
-    } else {
-        complete_current_request(AsyncDeviceRequest::Success);
-    }
-
-    irq_recieved = true;
+    m_irq_queue.wake_all();
 }
 
 UNMAP_AFTER_INIT void FloppyDiskDriveController::detect_drives()
@@ -176,6 +154,12 @@ UNMAP_AFTER_INIT void FloppyDiskDriveController::detect_drives()
 UNMAP_AFTER_INIT void FloppyDiskDriveController::initialize(){
     u8 res = 0;
 
+    if(m_use_dma){
+        initialize_dma();
+    } else {
+        TODO();
+    }
+
     send_cmd(FDC_CMD_CONFIGURE);
     send_cmd(0);
     send_cmd((1 << 6) | (0 << 5) | (1 << 4) | 8);
@@ -196,63 +180,51 @@ UNMAP_AFTER_INIT void FloppyDiskDriveController::initialize(){
     for(u8 i = 0; i < (u8)m_devices.size(); i++){
         calibrate(i);
     }
-
-    if(m_use_dma){
-        initialize_dma();
-    }
 }
 
 void FloppyDiskDriveController::initialize_dma(){
     auto page = MM.allocate_supervisor_physical_page();
     VERIFY(page);
     auto vmobject = AnonymousVMObject::create_with_physical_page(*page);
-    m_dma_region = MM.allocate_kernel_region_with_vmobject(*vmobject, PAGE_SIZE, "FDC DMA buffer", Region::Access::Read | Region::Access::Write);
+    m_dma_region = MM.allocate_kernel_region_with_vmobject(*vmobject, PAGE_SIZE, String::format("fd%c DMA buffer", label_char()), Region::Access::Read | Region::Access::Write);
     VERIFY(m_dma_region);
 
     u32 addr = (u32)m_dma_region->physical_page(0)->paddr().get();
     u16 count = 512 - 1;   // -1 because of DMA counting
 
-    u8 addr_0 = addr & 0x000000ff;
+    VERIFY(count <= PAGE_SIZE);
+
+    u8 addr_0 = (addr & 0x000000ff);
     u8 addr_1 = (addr & 0x0000ff00) >> 8;
     u8 addr_2 = (addr & 0x00ff0000) >> 16;
 
     u8 count_0 = count & 0x00ff;
     u8 count_1 = (count & 0xff00) >> 8;
 
-    dbgln_if(DEBUG_FDC, "fdc{:c} DMA addr={:08x} (0={:02x} 1={:02x} 2={:02x})", label_char(), addr, addr_0, addr_1, addr_2);
-    dbgln_if(DEBUG_FDC, "fdc{:c} DMA count={:04x} (0={:02x} 1={:02x})", label_char(), count, count_0, count_1);
-
-    // check that address is at most 24-bits (under 16MB)
-    // check that count is at most 16-bits (DMA limit)
-    // check that if we add count and address we don't get a carry
-    // (DMA can't deal with such a carry, this is the 64k boundary limit)
-    if((addr >> 24) || (count >> 16) || (((addr & 0xffff) + count) >> 16)) {
-        dbgln("fdc{:c}: DMA buffer error", label_char());
-        VERIFY_NOT_REACHED();
-    }
+    dbgln_if(DEBUG_FDC, "fdc{:c} DMA address={:08x} count={:04x}({})", label_char(), addr, count, count);
 
     IO::out8(0x0a, 0x06);       // mask dma channel 2
     IO::out8(0x0c, 0xff);	    // reset master flip-flop
     IO::out8(0x04, addr_0);     // dma address
 	IO::out8(0x04, addr_1);
-	IO::out8(0x81, addr_2);     // external page register 
-	IO::out8(0x0c, 0xff);       // reset master flip-flop
+	IO::out8(0x0c, 0xff);	    // reset master flip-flop
 	IO::out8(0x05, count_0);    // dma count
 	IO::out8(0x05, count_1);
+    IO::out8(0x81, addr_2);     // external page register 
 	IO::out8(0x0a, 0x02);       // unmask dma channel 2
 
 }
 
-void FloppyDiskDriveController::read_dma(){
-    IO::out8(0x0A, 0x06); //mask dma channel 2
-	IO::out8(0x0B, 0x56); //single transfer, address increment, autoinit, read, channel 2
-	IO::out8(0x0A, 0x02); //unmask dma channel 2
+void FloppyDiskDriveController::setup_dma_read(){
+    IO::out8(0x0a, 0x06); // mask dma channel 2
+	IO::out8(0x0b, 0x56); // single transfer, address increment, autoinit, read, channel 2
+	IO::out8(0x0a, 0x02); // unmask dma channel 2
 }
 
-void FloppyDiskDriveController::write_dma(){
-    IO::out8(0x0A, 0x06); //mask dma channel 2
-	IO::out8(0x0B, 0x5A); //single transfer, address increment, autoinit, write, channel 2
-	IO::out8(0x0A, 0x02); //unmask dma channel 2
+void FloppyDiskDriveController::setup_dma_write(){
+    IO::out8(0x0a, 0x06); // mask dma channel 2
+	IO::out8(0x0b, 0x5a); // single transfer, address increment, autoinit, write, channel 2
+	IO::out8(0x0a, 0x02); // unmask dma channel 2
 }
 
 u8 FloppyDiskDriveController::read_status(){
@@ -315,7 +287,7 @@ void FloppyDiskDriveController::motor_control(u8 label, bool on){
     }
 
     // FIXME: wait for motor to spin up
-    // wait for 300 ms
+    IO::delay(300);
 }
 
 bool FloppyDiskDriveController::calibrate(u8 label){
@@ -400,14 +372,10 @@ void FloppyDiskDriveController::reset(){
 }
 
 void FloppyDiskDriveController::read_sector_imp(u8 label, u8 head, u8 track, u8 sector){
-    dbgln_if(DEBUG_FDC, "fdc{:c}/fd{:c}: reading: head={} track={} sector={}", label_char(), drive_label_char(label), head, track, sector);
+    dbgln_if(DEBUG_FDC, "fdc{:c}/fd{:c}: reading from head={} track={} sector={}", label_char(), drive_label_char(label), head, track, sector);
 
-	//! set the DMA for read transfer
-    expect_irq();
+	setup_dma_read();
 
-	read_dma();
-
-	//! read in a sector
 	send_cmd(FDC_CMD_READ_SECT | FDC_CMD_EXT_MULTITRACK | FDC_CMD_EXT_DENSITY);
 	send_cmd(head << 2 | label);
 	send_cmd(track);
@@ -417,6 +385,8 @@ void FloppyDiskDriveController::read_sector_imp(u8 label, u8 head, u8 track, u8 
 	send_cmd((( sector + 1 ) >= FDC_SECTORS_PER_TRACK ) ? FDC_SECTORS_PER_TRACK : sector + 1 );
 	send_cmd(FDC_GAP3_LENGTH_3_5 );
 	send_cmd(0xFF);
+
+    dbgln_if(DEBUG_FDC, "fdc{:c}/fd{:c}: read command sent.", label_char(), drive_label_char(label));
 }
 
 bool FloppyDiskDriveController::seek(u8 label, u8 cyl, u8 head){
@@ -427,15 +397,13 @@ bool FloppyDiskDriveController::seek(u8 label, u8 cyl, u8 head){
     motor_control(label, true);
 
     for (u8 i = 0; i < 10; i++ ) {
-        //expect_irq();
+        expect_irq();
 
-		//! send the command
 		send_cmd(FDC_CMD_SEEK);
 		send_cmd((head << 2) | label);
 		send_cmd(cyl);
 
-		//! wait for the results phase IRQ
-		//wait_for_irq();   // NO INTERUPT???
+		wait_for_irq();   // seek does not fires an interrupt, but it should ??
 
 		check_interrupt(st0, cyl0);
 
@@ -444,7 +412,6 @@ bool FloppyDiskDriveController::seek(u8 label, u8 cyl, u8 head){
             dbgln_if(DEBUG_FDC, "fdc{:c}/fd{:c}: seek status={}\n", label_char(), drive_label_char(label), status[st0 >> 6]);
         }
 
-		//! found the cylinder?
 		if (cyl0 == cyl){
             dbgln_if(DEBUG_FDC, "fdc{:c}/fd{:c}: seeking done.", label_char(), drive_label_char(label));
             return true;
@@ -482,18 +449,32 @@ RefPtr<StorageDevice> FloppyDiskDriveController::device(u32 index) const{
 }
 
 void FloppyDiskDriveController::read_sector_with_dma(u8 label, u32 block){
+    u8 st0, cyl;
     u8 head = 0, track = 0, sector = 0;
+
 	lba_to_chs(block, head, track, sector);
     motor_control(label, true);
 
     if(seek (label, track, head) == false){
-        // FIXME: proper error report
         VERIFY_NOT_REACHED();
     }
 
+    expect_irq();
+
     read_sector_imp(label, head, track, sector);
 
-	motor_control(label, false);
+    wait_for_irq();
+
+    motor_control(label, false);
+
+    // FIXME: reason this
+    for (u8 i = 0; i < 7; i++)
+	 	read_data();
+	    
+	check_interrupt(st0, cyl);
+
+    // FIXME: check status
+    complete_current_request(AsyncDeviceRequest::Success);
 }
 
 void FloppyDiskDriveController::read_sector_with_polling(u8){

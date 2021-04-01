@@ -107,7 +107,7 @@
 #define	FDC_CMD_WRITE_SECT		0x05
 #define	FDC_CMD_READ_SECT		0x06
 #define	FDC_CMD_CALIBRATE		0x07
-#define	FDC_CMD_check_interrupt		0x08
+#define	FDC_CMD_SENSE_INT	    0x08
 #define	FDC_CMD_FORMAT_TRACK	0x0D
 #define	FDC_CMD_SEEK			0x0F
 #define FDC_CMD_VERSION         0x10
@@ -220,7 +220,7 @@ private:
 
     void reset();
 
-    void read_sector_imp(u8, u8, u8, u8);
+    bool read_sector_imp(u8, u8, u8, u8);
     bool seek(u8, u8, u8);
 
     void lba_to_chs(u32, u8&, u8&, u8&);
